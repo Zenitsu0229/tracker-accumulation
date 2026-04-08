@@ -14,10 +14,10 @@ function parseCSVRow(line: string): string[] {
   return result
 }
 
-// "YYYY/MM/DD" or "YYYY/MM/DD HH:MM:SS" → Date (local)
+// "YYYY/M/D" or "YYYY/MM/DD HH:MM:SS" → Date (local time)
 function parseDate(s: string): Date | null {
   if (!s || s === '-') return null
-  const m = s.match(/^(\d{4})\/(\d{2})\/(\d{2})(?:\s+(\d{2}):(\d{2}):(\d{2}))?/)
+  const m = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})(?:\s+(\d{2}):(\d{2}):(\d{2}))?/)
   if (!m) return null
   return new Date(+m[1], +m[2] - 1, +m[3], m[4] ? +m[4] : 0, m[5] ? +m[5] : 0, m[6] ? +m[6] : 0)
 }
@@ -29,23 +29,91 @@ function parseNum(s: string): number | null {
   return isNaN(n) ? null : n
 }
 
-// Normalize account display: "NISA口座ロールオーバー" → "NISA" etc.
+// Normalize account name for display
 function normalizeAccount(s: string): string {
   if (!s || s === '-') return ''
   if (s.startsWith('NISA')) return 'NISA'
+  if (s === '一般') return '一般'
+  if (s === '特定') return '特定'
   return s
+}
+
+// Normalize market name — PTS / Chi-X / etc. → 東証
+function normalizeMarket(s: string): string {
+  if (!s || s === '-') return '東証'
+  if (s === '東証' || s.startsWith('東')) return '東証'
+  return '東証'
+}
+
+// ── Shared FIFO matching ───────────────────────────────────
+interface RawOrder {
+  datetime: Date
+  code: string; name: string; account: string; market: string; tradeKind: string
+  side: '買付' | '売付'; qty: number; price: number
+}
+interface BuyLot { date: Date; price: number; qty: number }
+
+function fifoMatch(rawOrders: RawOrder[]): Trade[] {
+  // Group by code + account (NISA and 一般/特定 are separate positions)
+  const byGroup = new Map<string, RawOrder[]>()
+  for (const o of rawOrders) {
+    const key = `${o.code}::${o.account}`
+    const list = byGroup.get(key) ?? []; list.push(o); byGroup.set(key, list)
+  }
+
+  const trades: Trade[] = []
+
+  for (const orders of byGroup.values()) {
+    orders.sort((a, b) => a.datetime.getTime() - b.datetime.getTime())
+    const buyQueue: BuyLot[] = []
+
+    for (const order of orders) {
+      if (order.side === '買付') {
+        buyQueue.push({ date: order.datetime, price: order.price, qty: order.qty })
+        continue
+      }
+      // Sell: FIFO consume buy lots
+      let remaining = order.qty, totalCost = 0, matchedQty = 0
+      let firstBuyDate: Date | null = null
+
+      while (remaining > 0 && buyQueue.length > 0) {
+        const lot = buyQueue[0]
+        const take = Math.min(remaining, lot.qty)
+        if (!firstBuyDate) firstBuyDate = lot.date
+        totalCost += lot.price * take; matchedQty += take
+        remaining -= take; lot.qty -= take
+        if (lot.qty === 0) buyQueue.shift()
+      }
+      if (matchedQty === 0) continue  // No matching buy in this CSV period
+
+      const avgBuyPrice = totalCost / matchedQty
+      const pnl = Math.round((order.price - avgBuyPrice) * matchedQty)
+
+      trades.push({
+        closeDate: order.datetime,
+        openDate: firstBuyDate,
+        code: order.code, name: order.name,
+        account: order.account, market: order.market,
+        type: order.tradeKind, creditType: '',
+        pnlYen: pnl, pnlUsd: null, pnl,
+        avgCostYen: Math.round(avgBuyPrice * 100) / 100,
+        price: order.price, qty: matchedQty,
+      })
+    }
+  }
+  return trades
 }
 
 // ══════════════════════════════════════════════════════════════
 //  FORMAT A: 実現損益レポート (realized_pl CSV)  — 12 columns
 //
-//  [0]  開始日          YYYY/MM/DD  (取得/建玉日)
-//  [1]  決済日          YYYY/MM/DD
+//  [0]  開始日 (約定日/取得日)   YYYY/M/D
+//  [1]  決済日                   YYYY/M/D
 //  [2]  銘柄コード
 //  [3]  銘柄名
-//  [4]  口座区分        特定 / NISA口座ロールオーバー / …
-//  [5]  信用区分        -
-//  [6]  取引            現物
+//  [4]  口座区分
+//  [5]  信用区分
+//  [6]  取引区分                 現物
 //  [7]  数量[株/口]
 //  [8]  約定/決済単価[円]
 //  [9]  約定/決済金額[円]
@@ -62,8 +130,7 @@ function parsePlReport(lines: string[]): Trade[] {
     const closeDate = parseDate(row[1])
     if (!closeDate) continue
 
-    const code = row[2]
-    if (!code) continue
+    const code = row[2]; if (!code) continue
 
     const qty        = parseNum(row[7])
     const price      = parseNum(row[8])
@@ -72,20 +139,14 @@ function parsePlReport(lines: string[]): Trade[] {
     if (pnlYen === null) continue
 
     trades.push({
-      closeDate,
-      openDate,
-      code,
+      closeDate, openDate, code,
       name:       row[3] ?? '',
       account:    normalizeAccount(row[4] ?? ''),
-      market:     '',
+      market:     '東証',
       type:       row[6] ?? '現物',
       creditType: row[5] ?? '',
-      pnlYen,
-      pnlUsd: null,
-      pnl: pnlYen,
-      avgCostYen,
-      price,
-      qty,
+      pnlYen, pnlUsd: null, pnl: pnlYen,
+      avgCostYen, price, qty,
     })
   }
   return trades
@@ -94,19 +155,18 @@ function parsePlReport(lines: string[]): Trade[] {
 // ══════════════════════════════════════════════════════════════
 //  FORMAT B: 注文ログ CSV (order log)  — 40+ columns
 //
-//  [3]  通常注文状況    "約定" | …
+//  [3]  通常注文状況    "約定"
 //  [6]  コード
 //  [7]  銘柄名
 //  [8]  口座区分
 //  [9]  市場
 //  [12] 発注/受注日時   "YYYY/MM/DD HH:MM:SS"
 //  [13] 売買            買付 | 売付
-//  [14] 取引            現物
+//  [14] 取引
 //  [19] 約定数量
 //  [20] 注文単価        price or "成行"
-//  [39] 価格判定情報    "売気配(X) 買気配(Y)"  (成行 orders)
+//  [39] 価格判定情報    "売気配(X) 買気配(Y)"
 // ══════════════════════════════════════════════════════════════
-
 function extractBidAsk(info: string): { ask: number | null; bid: number | null } {
   const a = info.match(/売気配\(([\d,.]+)\)/)
   const b = info.match(/買気配\(([\d,.]+)\)/)
@@ -115,13 +175,6 @@ function extractBidAsk(info: string): { ask: number | null; bid: number | null }
     bid: b ? parseFloat(b[1].replace(/,/g, '')) : null,
   }
 }
-
-interface RawOrder {
-  datetime: Date
-  code: string; name: string; account: string; market: string; tradeKind: string
-  side: '買付' | '売付'; qty: number; price: number
-}
-interface BuyLot { date: Date; price: number; qty: number }
 
 function parseOrderLog(lines: string[]): Trade[] {
   const rawOrders: RawOrder[] = []
@@ -137,9 +190,7 @@ function parseOrderLog(lines: string[]): Trade[] {
     const side = row[13]
     if (side !== '買付' && side !== '売付') continue
 
-    const datetime = parseDate(row[12])
-    if (!datetime) continue
-
+    const datetime = parseDate(row[12]); if (!datetime) continue
     const code = row[6]; if (!code) continue
 
     let price: number | null = parseNum(row[20] ?? '')
@@ -152,69 +203,76 @@ function parseOrderLog(lines: string[]): Trade[] {
     rawOrders.push({
       datetime, code,
       name: row[7] ?? '', account: normalizeAccount(row[8] ?? ''),
-      market: row[9] ?? '', tradeKind: row[14] ?? '現物',
+      market: '東証', tradeKind: row[14] ?? '現物',
       side: side as '買付' | '売付', qty, price,
     })
   }
-
-  // FIFO match per code+account
-  const byGroup = new Map<string, RawOrder[]>()
-  for (const o of rawOrders) {
-    const key = `${o.code}::${o.account}`
-    const list = byGroup.get(key) ?? []; list.push(o); byGroup.set(key, list)
-  }
-
-  const trades: Trade[] = []
-  for (const orders of byGroup.values()) {
-    orders.sort((a, b) => a.datetime.getTime() - b.datetime.getTime())
-    const buyQueue: BuyLot[] = []
-
-    for (const order of orders) {
-      if (order.side === '買付') {
-        buyQueue.push({ date: order.datetime, price: order.price, qty: order.qty })
-        continue
-      }
-      let remaining = order.qty, totalCost = 0, matchedQty = 0
-      let firstBuyDate: Date | null = null
-      while (remaining > 0 && buyQueue.length > 0) {
-        const lot = buyQueue[0]
-        const take = Math.min(remaining, lot.qty)
-        if (!firstBuyDate) firstBuyDate = lot.date
-        totalCost += lot.price * take; matchedQty += take
-        remaining -= take; lot.qty -= take
-        if (lot.qty === 0) buyQueue.shift()
-      }
-      if (matchedQty === 0) continue
-
-      const avgBuyPrice = totalCost / matchedQty
-      const pnl = Math.round((order.price - avgBuyPrice) * matchedQty)
-      trades.push({
-        closeDate: order.datetime, openDate: firstBuyDate,
-        code: order.code, name: order.name, account: order.account,
-        market: order.market, type: order.tradeKind, creditType: '',
-        pnlYen: pnl, pnlUsd: null, pnl,
-        avgCostYen: Math.round(avgBuyPrice * 100) / 100,
-        price: order.price, qty: matchedQty,
-      })
-    }
-  }
-  return trades
+  return fifoMatch(rawOrders)
 }
 
 // ══════════════════════════════════════════════════════════════
-//  Auto-detect format and parse
+//  FORMAT C: 取引履歴 CSV (trade history)  — 28 columns
+//
+//  [0]  約定日          YYYY/M/D  ← 実際の約定日（最も正確）
+//  [1]  受渡日
+//  [2]  銘柄コード
+//  [3]  銘柄名
+//  [4]  市場名称        東証, Chi-X
+//  [5]  口座区分        一般, NISA成長投資枠
+//  [6]  取引区分        現物
+//  [7]  売買区分        買付 | 売付
+//  [10] 数量[株]
+//  [11] 単価[円]        実際の約定単価（直接記載）
+// ══════════════════════════════════════════════════════════════
+function parseTradeHistory(lines: string[]): Trade[] {
+  const rawOrders: RawOrder[] = []
+
+  for (let i = 1; i < lines.length; i++) {
+    const row = parseCSVRow(lines[i])
+    if (row.length < 12) continue
+
+    const side = row[7]
+    if (side !== '買付' && side !== '売付') continue
+
+    const datetime = parseDate(row[0]); if (!datetime) continue
+    const code = row[2]; if (!code) continue
+
+    const qty   = parseNum(row[10]); if (!qty || qty <= 0) continue
+    const price = parseNum(row[11]); if (price === null) continue
+
+    rawOrders.push({
+      datetime, code,
+      name:      row[3] ?? '',
+      account:   normalizeAccount(row[5] ?? ''),
+      market:    normalizeMarket(row[4] ?? ''),
+      tradeKind: row[6] ?? '現物',
+      side: side as '買付' | '売付',
+      qty, price,
+    })
+  }
+  return fifoMatch(rawOrders)
+}
+
+// ══════════════════════════════════════════════════════════════
+//  Auto-detect format by column count and dispatch
+//
+//  >= 30 cols → Format B (order log)
+//  20–29 cols → Format C (trade history)   ← NEW
+//  < 20  cols → Format A (realized P&L report)
 // ══════════════════════════════════════════════════════════════
 export function parseCSV(text: string): Trade[] {
   const lines = text.trim().split('\n')
   if (lines.length < 2) return []
 
-  // Find first non-empty data row to count columns
-  let firstData = parseCSVRow(lines[1] ?? '')
+  // Detect from first non-empty data row
+  let firstData: string[] = []
   for (let i = 1; i < lines.length; i++) {
     const r = parseCSVRow(lines[i])
     if (r.length > 2) { firstData = r; break }
   }
 
-  // ≥ 20 columns → order log; ≤ 15 columns → realized P&L report
-  return firstData.length >= 20 ? parseOrderLog(lines) : parsePlReport(lines)
+  const cols = firstData.length
+  if (cols >= 30) return parseOrderLog(lines)
+  if (cols >= 20) return parseTradeHistory(lines)
+  return parsePlReport(lines)
 }
