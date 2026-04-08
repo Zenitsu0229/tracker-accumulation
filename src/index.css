@@ -1,0 +1,151 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #000000;
+  --surface: #0c0c0c;
+  --surface2: #161616;
+  --border: #2a2a2a;
+  --border-bright: #404040;
+  --muted: #606060;
+  --text: #e8e8e8;
+  --accent: #6366f1;
+  --accent-dim: rgba(99, 102, 241, 0.15);
+}
+
+/* ── Reset ── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  border-radius: 0 !important;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', 'Noto Sans JP', 'Hiragino Sans', sans-serif;
+  min-height: 100vh;
+  margin: 0;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border-bright); }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+/* ── Recharts ── */
+.recharts-default-tooltip {
+  background: var(--surface) !important;
+  border: 1px solid var(--border-bright) !important;
+}
+.recharts-tooltip-label { color: var(--text) !important; }
+
+/* ── Date input ── */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.5);
+  cursor: pointer;
+}
+
+/* ── Select option ── */
+select option {
+  background: var(--surface2);
+  color: var(--text);
+}
+
+/* ── Square card utility ── */
+.sq-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 16px 20px;
+}
+.sq-card:hover {
+  border-color: var(--border-bright);
+}
+
+/* ── Accent left-border on section titles ── */
+.section-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding-left: 10px;
+  border-left: 2px solid var(--accent);
+  margin-bottom: 16px;
+}
+
+/* ── Button base ── */
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 6px 14px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn-primary:hover { opacity: 0.85; }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  padding: 5px 12px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.btn-ghost:hover { border-color: var(--border-bright); color: var(--text); }
+
+/* ── Table ── */
+table { border-collapse: collapse; width: 100%; }
+thead th {
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border-bright);
+  padding: 7px 12px;
+  text-align: left;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+tbody td {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8rem;
+}
+tbody tr:hover td { background: var(--surface2); }
+
+/* ── Stat value colors ── */
+.text-profit { color: #22c55e; }
+.text-loss   { color: #ef4444; }
+.text-dim    { color: var(--muted); }
+
+/* ── Tab active indicator ── */
+.tab-active-line {
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--accent);
+}
+
+/* ── Lightweight-charts container ── */
+.lw-chart-container canvas {
+  display: block;
+}
+
+/* ── Ranking table row hint icon ── */
+tbody tr:hover .row-chart-hint {
+  opacity: 1 !important;
+  color: var(--accent) !important;
+}
