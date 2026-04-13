@@ -260,19 +260,37 @@ function parseTradeHistory(lines: string[]): Trade[] {
 //  20–29 cols → Format C (trade history)   ← NEW
 //  < 20  cols → Format A (realized P&L report)
 // ══════════════════════════════════════════════════════════════
-export function parseCSV(text: string): Trade[] {
+function detectLines(text: string) {
   const lines = text.trim().split('\n')
-  if (lines.length < 2) return []
-
-  // Detect from first non-empty data row
+  if (lines.length < 2) return { lines, cols: 0 }
   let firstData: string[] = []
   for (let i = 1; i < lines.length; i++) {
     const r = parseCSVRow(lines[i])
     if (r.length > 2) { firstData = r; break }
   }
+  return { lines, cols: firstData.length }
+}
 
-  const cols = firstData.length
+export function parseCSV(text: string): Trade[] {
+  const { lines, cols } = detectLines(text)
+  if (lines.length < 2) return []
   if (cols >= 30) return parseOrderLog(lines)
   if (cols >= 20) return parseTradeHistory(lines)
+  return parsePlReport(lines)
+}
+
+/** 取引履歴CSV専用パーサ（注文ログ・取引履歴フォーマット対応） */
+export function parseCSVTradeHistory(text: string): Trade[] {
+  const { lines, cols } = detectLines(text)
+  if (lines.length < 2) return []
+  if (cols >= 30) return parseOrderLog(lines)
+  if (cols >= 20) return parseTradeHistory(lines)
+  return []
+}
+
+/** 実現損益CSV専用パーサ */
+export function parseCSVPlReport(text: string): Trade[] {
+  const { lines } = detectLines(text)
+  if (lines.length < 2) return []
   return parsePlReport(lines)
 }

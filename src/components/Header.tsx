@@ -1,21 +1,37 @@
 import { useRef } from 'react'
 import { Upload, RotateCcw } from 'lucide-react'
 import { useStore } from '../store'
-import { parseCSV } from '../utils/csvParser'
+import { parseCSVTradeHistory, parseCSVPlReport } from '../utils/csvParser'
 
 export default function Header() {
-  const inputRef = useRef<HTMLInputElement>(null)
-  const { dateRange, setTrades, setDateRange, applyFilter } = useStore()
+  const tradeHistoryRef = useRef<HTMLInputElement>(null)
+  const plReportRef = useRef<HTMLInputElement>(null)
+  const { dateRange, setTradeHistory, setPlReport, setDateRange, applyFilter } = useStore()
+  const hasTradeHistory = useStore((s) => s.tradeHistoryTrades.length > 0)
+  const hasPlReport = useStore((s) => s.plReportTrades.length > 0)
+  const tradeHistoryCount = useStore((s) => s.tradeHistoryTrades.length)
+  const plReportCount = useStore((s) => s.plReportTrades.length)
   const hasData = useStore((s) => s.allTrades.length > 0)
-  const tradeCount = useStore((s) => s.allTrades.length)
 
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleTradeHistory = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
     const reader = new FileReader()
     reader.onload = (ev) => {
-      const trades = parseCSV(ev.target!.result as string)
-      setTrades(trades)
+      const trades = parseCSVTradeHistory(ev.target!.result as string)
+      setTradeHistory(trades)
+    }
+    reader.readAsText(file, 'Shift-JIS')
+    e.target.value = ''
+  }
+
+  const handlePlReport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const trades = parseCSVPlReport(ev.target!.result as string)
+      setPlReport(trades)
     }
     reader.readAsText(file, 'Shift-JIS')
     e.target.value = ''
@@ -44,7 +60,7 @@ export default function Header() {
       borderBottom: '1px solid var(--border-bright)',
       display: 'flex',
       alignItems: 'center',
-      gap: 16,
+      gap: 12,
       padding: '0 24px',
       height: 52,
       flexWrap: 'wrap' as const,
@@ -52,7 +68,7 @@ export default function Header() {
     brand: { display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 },
     title: { fontSize: '0.95rem', fontWeight: 700, color: 'var(--text)' },
     accent: { color: 'var(--accent)' },
-    divider: { width: 1, height: 24, background: 'var(--border-bright)', margin: '0 4px' },
+    divider: { width: 1, height: 24, background: 'var(--border-bright)', margin: '0 2px' },
     dateLabel: { fontSize: '0.75rem', color: 'var(--muted)' },
     dateInput: {
       background: 'var(--surface2)',
@@ -63,12 +79,14 @@ export default function Header() {
       outline: 'none',
     },
     filterRow: { display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto', flexWrap: 'wrap' as const },
-    countBadge: {
-      fontSize: '0.72rem',
-      color: 'var(--muted)',
-      padding: '2px 8px',
-      border: '1px solid var(--border)',
-    },
+    uploadGroup: { display: 'flex', alignItems: 'center', gap: 6 },
+    countBadge: (loaded: boolean) => ({
+      fontSize: '0.7rem',
+      padding: '1px 6px',
+      border: `1px solid ${loaded ? 'var(--accent)' : 'var(--border)'}`,
+      color: loaded ? 'var(--accent)' : 'var(--muted)',
+      borderRadius: 3,
+    }),
   }
 
   return (
@@ -83,14 +101,26 @@ export default function Header() {
 
       <div style={S.divider} />
 
-      {/* Upload */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <button className="btn-primary" onClick={() => inputRef.current?.click()}>
+      {/* Upload: 取引履歴 */}
+      <div style={S.uploadGroup}>
+        <button className="btn-primary" onClick={() => tradeHistoryRef.current?.click()}>
           <Upload size={13} />
-          CSVを読み込む
+          取引履歴
         </button>
-        <input ref={inputRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleFile} />
-        {hasData && <span style={S.countBadge}>{tradeCount}件</span>}
+        <input ref={tradeHistoryRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleTradeHistory} />
+        {hasTradeHistory && <span style={S.countBadge(true)}>{tradeHistoryCount}件</span>}
+      </div>
+
+      <div style={S.divider} />
+
+      {/* Upload: 実現損益 */}
+      <div style={S.uploadGroup}>
+        <button className="btn-primary" onClick={() => plReportRef.current?.click()}>
+          <Upload size={13} />
+          実現損益
+        </button>
+        <input ref={plReportRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handlePlReport} />
+        {hasPlReport && <span style={S.countBadge(true)}>{plReportCount}件</span>}
       </div>
 
       {/* Date filter */}
