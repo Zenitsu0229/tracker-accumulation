@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useStore } from '../../store'
-import { StockData, Trade } from '../../types'
+import { StockData, Trade, TradeEntry } from '../../types'
 import { fetchStockData } from '../../utils/stockApi'
 import { fmtYen, fmtDate, fmtTime, fmtPct } from '../../utils/formatters'
-import { mergeTradeData } from '../../utils/mergeTradeData'
 import StockPriceChart from '../charts/StockPriceChart'
+import StockSearchSelect from '../StockSearchSelect'
 import { Loader2, AlertCircle } from 'lucide-react'
 
 function SqCard({ title, children }: { title: string; children: React.ReactNode }) {
@@ -123,10 +123,10 @@ function TradeTable({ trades }: { trades: Trade[] }) {
 
 export default function DetailTab() {
   // 実現損益データ（P&L計算の基準）
-  const filteredTrades     = useStore((s) => s.filteredTrades)
-  // 取引履歴データ（チャートマーカー専用）
-  const tradeHistoryTrades = useStore((s) => s.tradeHistoryTrades)
-  const selectedStock  = useStore((s) => s.selectedStock)
+  const filteredTrades = useStore((s) => s.filteredTrades)
+  // 取引履歴の個別注文レコード（チャートマーカー専用）
+  const tradeEntries   = useStore((s) => s.tradeEntries)
+  const selectedStock    = useStore((s) => s.selectedStock)
   const setSelectedStock = useStore((s) => s.setSelectedStock)
 
   const [stockData, setStockData] = useState<StockData | null>(null)
@@ -161,22 +161,12 @@ export default function DetailTab() {
       .sort((a, b) => a.closeDate.getTime() - b.closeDate.getTime())
   }, [filteredTrades, selectedStock])
 
-  // チャートマーカー用 → 取引履歴が読み込み済みならそのエントリー/決済日を使用
-  // P&Lは実現損益側の値で上書きして正確性を保つ
-  const chartTrades = useMemo(() => {
-    if (!selectedStock || !stockTrades.length) return stockTrades
-    if (!tradeHistoryTrades.length) return stockTrades
-
-    const [code, name] = selectedStock.split('|')
-    const histForStock = tradeHistoryTrades
-      .filter((t) => t.code === code && t.name === name)
-      .sort((a, b) => a.closeDate.getTime() - b.closeDate.getTime())
-
-    if (!histForStock.length) return stockTrades
-
-    // 取引履歴のエントリー/決済日 + 実現損益のP&L でマージ
-    return mergeTradeData(stockTrades, histForStock)
-  }, [stockTrades, tradeHistoryTrades, selectedStock])
+  // チャートマーカー用 → 取引履歴の個別注文レコードを銘柄でフィルタ
+  const chartEntries = useMemo<TradeEntry[]>(() => {
+    if (!selectedStock) return []
+    const [code] = selectedStock.split('|')
+    return tradeEntries.filter((e) => e.code === code)
+  }, [tradeEntries, selectedStock])
 
   const stats = useMemo(() => calcStats(stockTrades), [stockTrades])
 
@@ -213,28 +203,21 @@ export default function DetailTab() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Selector */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>銘柄選択:</span>
-        <select
+        <span style={{ fontSize: '0.8rem', color: 'var(--muted)', flexShrink: 0 }}>銘柄選択:</span>
+        <StockSearchSelect
+          options={stockOptions.map((s) => ({
+            value: `${s.code}|${s.name}`,
+            code:  s.code,
+            name:  s.name,
+            pnl:   s.pnl,
+            count: s.count,
+          }))}
           value={selectedStock}
-          onChange={(e) => setSelectedStock(e.target.value)}
-          style={{
-            background: 'var(--surface)', border: '1px solid var(--border-bright)',
-            color: 'var(--text)', padding: '6px 12px', fontSize: '0.85rem',
-            minWidth: 280, outline: 'none', cursor: 'pointer',
-          }}
-        >
-          {stockOptions.map((s) => {
-            const sign = s.pnl >= 0 ? '+' : ''
-            return (
-              <option key={`${s.code}|${s.name}`} value={`${s.code}|${s.name}`}>
-                {s.name}（{s.code}） — {sign}{Math.round(s.pnl).toLocaleString()}円 / {s.count}件
-              </option>
-            )
-          })}
-        </select>
-        {tradeHistoryTrades.length > 0 && (
+          onChange={setSelectedStock}
+        />
+        {tradeEntries.length > 0 && (
           <span style={{ fontSize: '0.72rem', color: 'var(--muted)', padding: '2px 8px', border: '1px solid var(--border)' }}>
-            チャートマーカー: 取引履歴
+            マーカー: 取引履歴 {chartEntries.length}件
           </span>
         )}
       </div>
@@ -270,7 +253,11 @@ export default function DetailTab() {
         )}
         {!loading && !error && stockData && (
           <div className="lw-chart-container">
-            <StockPriceChart stockData={stockData} trades={chartTrades} />
+            <StockPriceChart
+              stockData={stockData}
+              entries={chartEntries}
+              trades={stockTrades}
+            />
           </div>
         )}
       </SqCard>

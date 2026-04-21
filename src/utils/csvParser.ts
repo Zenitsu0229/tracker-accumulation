@@ -1,4 +1,4 @@
-import { Trade } from '../types'
+import { Trade, TradeEntry } from '../types'
 
 // ── CSV row tokenizer ──────────────────────────────────────
 function parseCSVRow(line: string): string[] {
@@ -84,7 +84,18 @@ function fifoMatch(rawOrders: RawOrder[]): Trade[] {
         remaining -= take; lot.qty -= take
         if (lot.qty === 0) buyQueue.shift()
       }
-      if (matchedQty === 0) continue  // No matching buy in this CSV period
+      if (matchedQty === 0) {
+        // No matching buy in this CSV period → include as sell-only marker (pnl=null)
+        trades.push({
+          closeDate: order.datetime, openDate: null,
+          code: order.code, name: order.name,
+          account: order.account, market: order.market,
+          type: order.tradeKind, creditType: '',
+          pnlYen: null, pnlUsd: null, pnl: null,
+          avgCostYen: null, price: order.price, qty: order.qty,
+        })
+        continue
+      }
 
       const avgBuyPrice = totalCost / matchedQty
       const pnl = Math.round((order.price - avgBuyPrice) * matchedQty)
@@ -214,7 +225,7 @@ function parseOrderLog(lines: string[]): Trade[] {
 //  FORMAT C: 取引履歴 CSV (trade history)  — 28 columns
 //
 //  [0]  約定日          YYYY/M/D  ← 実際の約定日（最も正確）
-//  [1]  受渡日
+//  [1]  受渡日          YYYY/M/D  ← 無視する
 //  [2]  銘柄コード
 //  [3]  銘柄名
 //  [4]  市場名称        東証, Chi-X
@@ -293,4 +304,73 @@ export function parseCSVPlReport(text: string): Trade[] {
   const { lines } = detectLines(text)
   if (lines.length < 2) return []
   return parsePlReport(lines)
+}
+
+// ══════════════════════════════════════════════════════════════
+//  取引履歴 個別注文エントリパーサ（FIFOマッチングなし）
+//  チャートマーカー専用 — 買付/売付を個別に返す
+// ══════════════════════════════════════════════════════════════
+
+function parseTradeHistoryRawEntries(lines: string[]): TradeEntry[] {
+  const entries: TradeEntry[] = []
+  for (let i = 1; i < lines.length; i++) {
+    const row = parseCSVRow(lines[i])
+    if (row.length < 12) continue
+    const side = row[7]
+    if (side !== '買付' && side !== '売付') continue
+    const date = parseDate(row[0]); if (!date) continue  // [0]=約定日
+    const code = row[2]; if (!code) continue
+    const qty   = parseNum(row[10]); if (!qty || qty <= 0) continue
+    const price = parseNum(row[11]); if (price === null) continue
+    entries.push({
+      date, code,
+      name:    row[3] ?? '',
+      account: normalizeAccount(row[5] ?? ''),
+      market:  normalizeMarket(row[4] ?? ''),
+      side:    side as '買付' | '売付',
+      qty, price,
+    })
+  }
+  return entries
+}
+
+function parseOrderLogRawEntries(lines: string[]): TradeEntry[] {
+  const entries: TradeEntry[] = []
+  for (let i = 1; i < lines.length; i++) {
+    const row = parseCSVRow(lines[i])
+    if (row.length < 20) continue
+    if (row[3] !== '約定') continue
+    const qty = parseNum(row[19]); if (!qty || qty <= 0) continue
+    const side = row[13]
+    if (side !== '買付' && side !== '売付') continue
+    const date = parseDate(row[12]); if (!date) continue
+    const code = row[6]; if (!code) continue
+    let price: number | null = parseNum(row[20] ?? '')
+    if (price === null) {
+      const { ask, bid } = extractBidAsk(row[39] ?? '')
+      price = side === '買付' ? ask : bid
+    }
+    if (price === null) continue
+    entries.push({
+      date, code,
+      name:    row[7] ?? '',
+      account: normalizeAccount(row[8] ?? ''),
+      market:  '東証',
+      side:    side as '買付' | '売付',
+      qty, price,
+    })
+  }
+  return entries
+}
+
+/**
+ * 取引履歴CSVから個別注文レコード（TradeEntry）を取得する。
+ * FIFOマッチングは行わない — チャートマーカー専用。
+ */
+export function parseCSVTradeHistoryEntries(text: string): TradeEntry[] {
+  const { lines, cols } = detectLines(text)
+  if (lines.length < 2) return []
+  if (cols >= 30) return parseOrderLogRawEntries(lines)
+  if (cols >= 20) return parseTradeHistoryRawEntries(lines)
+  return []
 }

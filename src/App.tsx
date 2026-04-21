@@ -5,12 +5,14 @@ import OverviewTab from './components/tabs/OverviewTab'
 import MonthlyTab from './components/tabs/MonthlyTab'
 import RankingTab from './components/tabs/RankingTab'
 import DetailTab from './components/tabs/DetailTab'
+import CalendarTab from './components/tabs/CalendarTab'
 
 const TABS = [
-  { id: 'overview', label: '損益推移' },
-  { id: 'monthly',  label: '月別・市場別' },
-  { id: 'ranking',  label: '銘柄ランキング' },
-  { id: 'detail',   label: '個別銘柄チャート' },
+  { id: 'overview',  label: '損益推移' },
+  { id: 'monthly',   label: '月別・市場別' },
+  { id: 'ranking',   label: '銘柄ランキング' },
+  { id: 'detail',    label: '個別銘柄チャート' },
+  { id: 'calendar',  label: 'カレンダー' },
 ]
 
 function EmptyState() {
@@ -73,10 +75,11 @@ export default function App() {
 
           {/* Tab content */}
           <div style={{ padding: '20px 24px' }}>
-            {activeTab === 'overview' && <OverviewTab />}
-            {activeTab === 'monthly'  && <MonthlyTab />}
-            {activeTab === 'ranking'  && <RankingTab />}
-            {activeTab === 'detail'   && <DetailTab />}
+            {activeTab === 'overview'  && <OverviewTab />}
+            {activeTab === 'monthly'   && <MonthlyTab />}
+            {activeTab === 'ranking'   && <RankingTab />}
+            {activeTab === 'detail'    && <DetailTab />}
+            {activeTab === 'calendar'  && <CalendarTab />}
           </div>
         </>
       )}

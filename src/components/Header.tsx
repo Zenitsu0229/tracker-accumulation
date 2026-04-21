@@ -1,15 +1,15 @@
 import { useRef } from 'react'
 import { Upload, RotateCcw } from 'lucide-react'
 import { useStore } from '../store'
-import { parseCSVTradeHistory, parseCSVPlReport } from '../utils/csvParser'
+import { parseCSVTradeHistory, parseCSVPlReport, parseCSVTradeHistoryEntries } from '../utils/csvParser'
 
 export default function Header() {
   const tradeHistoryRef = useRef<HTMLInputElement>(null)
   const plReportRef = useRef<HTMLInputElement>(null)
   const { dateRange, setTradeHistory, setPlReport, setDateRange, applyFilter } = useStore()
-  const hasTradeHistory = useStore((s) => s.tradeHistoryTrades.length > 0)
+  const hasTradeHistory = useStore((s) => s.tradeEntries.length > 0)
   const hasPlReport = useStore((s) => s.plReportTrades.length > 0)
-  const tradeHistoryCount = useStore((s) => s.tradeHistoryTrades.length)
+  const tradeHistoryCount = useStore((s) => s.tradeEntries.length)
   const plReportCount = useStore((s) => s.plReportTrades.length)
   const hasData = useStore((s) => s.allTrades.length > 0)
 
@@ -18,8 +18,10 @@ export default function Header() {
     if (!file) return
     const reader = new FileReader()
     reader.onload = (ev) => {
-      const trades = parseCSVTradeHistory(ev.target!.result as string)
-      setTradeHistory(trades)
+      const text = ev.target!.result as string
+      const trades  = parseCSVTradeHistory(text)
+      const entries = parseCSVTradeHistoryEntries(text)
+      setTradeHistory(trades, entries)
     }
     reader.readAsText(file, 'Shift-JIS')
     e.target.value = ''
